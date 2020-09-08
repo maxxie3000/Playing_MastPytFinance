@@ -350,5 +350,3 @@ class BinomialCRRLattice(binomialCRROption):
 # am_opt = BinomialCRRLattice(50,52, r=0.05, T=2, N=2, sigma=0.3, is_put=True, is_am=True)
 # print(f'EU put price: {eu_opt.price()}, AM put price: {am_opt.price()}')
 # prints: EU put price: 6.245708445206432, AM put price: 7.428401902704828
-
-                                     
