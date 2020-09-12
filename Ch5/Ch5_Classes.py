@@ -133,10 +133,157 @@ def bond_ytm(price, par, T, coup, freq=2, guess=0.001):
 
     return optimize.newton(ytm_func, guess)
 
-ytm = bond_ytm(95.0428, 100, 2, 5.75, 1)
+ytm = bond_ytm(95.0428, 100, 1.5, 5.75, 2)
 print(ytm)
+# Prints: 0.09369155345237921
 
 #%% Calculating the price of a bond
 
 def bond_price(par, T, ytm, coup, freq=2):
     periods = T * freq
+    coupon = coup / 100 * par
+    dt = [(i+1)/freq for i in range(int(periods))]
+    price = sum([coupon/freq/(1+ytm/freq)**(freq*t) for t in dt]) + \
+        par/(1+ytm/freq)**(freq*T)
+    return price
+
+price = bond_price(100, 1.5, ytm, 5.75, 2)
+print(price)
+# Prints: 95.0428000000021
+
+#%% Bond Duration
+
+def bond_mod_duration(price, par, T, coup, freq, dy=0.01):
+    ytm = bond_ytm(price, par, T, coup, freq)
+    # Get P -
+    ytm_minus = ytm - dy
+    price_minus = bond_price(par, T, ytm_minus, coup, freq)
+    # Get P +
+    ytm_plus = ytm + dy
+    price_plus = bond_price(par, T, ytm_plus, coup, freq)
+    # Calculate modified duration
+    mduration = (price_minus - price_plus) / (2*price*dy)
+    return mduration
+
+mod_duration = bond_mod_duration(95.0428, 100, 1.5, 5.75, 2)
+print(mod_duration)
+# prints: 1.3921935426561558
+
+#%% Bond convexity
+
+def bond_convexity(price, par, T, coup, freq, dy=0.01):
+    ytm = bond_ytm(price, par, T, coup, freq)
+    # Get P -
+    ytm_minus = ytm - dy
+    price_minus = bond_price(par, T, ytm_minus, coup, freq)
+    # Get P +
+    ytm_plus = ytm + dy
+    price_plus = bond_price(par, T, ytm_plus, coup, freq)
+    # Calculate convexity
+    convexity = (price_minus + price_plus - 2*price) / (price*dy**2)
+    return convexity
+
+convexity = bond_convexity(95.0428, 100, 1.5, 5.75, 2)
+print(convexity)
+
+#%% Short rate modelling
+
+# The Vasicek model
+
+import math
+import numpy as np
+
+def vasicek(r0, K, theta, sigma, T=1, N=10, seed=777):
+    np.random.seed(seed)
+    dt = T/float(N)
+    rates = [r0]
+    for i in range(N):
+        dr = K*(theta-rates[-1])*dt + \
+            sigma*math.sqrt(dt)*np.random.normal()
+        rates.append(rates[-1]+dr)
+    return range(N+1), rates
+
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(12, 8))
+for K in [0.002, 0.02, 0.2, 2]:
+    x, y = vasicek(0.005, K, 0.15, 0.05, T=10, N=200)
+    ax.plot(x, y, label=f'K={K}')
+
+ax.legend(loc='upper left')
+ax.set_xlabel('Vasicek model');
+
+#%% The Cox-Ingersoll-Ross model
+
+import math
+import numpy as np
+
+def CIR(r0, K, theta, sigma, T=1, N=10, seed=777):
+    np.random.seed(seed)
+    dt = T/float(N)
+    rates = [r0]
+    for i in range(N):
+        dr = K*(theta-rates[-1])*dt + \
+            sigma*math.sqrt(rates[-1])* \
+            math.sqrt(dt)*np.random.normal()
+        rates.append(rates[-1]+dr)
+    return range(N+1), rates
+
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(12, 8))
+for K in [0.002, 0.02, 0.2, 2]:
+    x, y = CIR(0.005, K, 0.15, 0.05, T=10, N=200)
+    ax.plot(x, y, label=f'K={K}')
+
+ax.legend(loc='upper left')
+ax.set_xlabel('CIR model');
+
+#%% The Brennan and Schwartz model
+
+import math
+import numpy as np
+
+def brennan_schwartz(r0, K, theta, sigma, T=1, N=10, seed=1):
+    np.random.seed(seed)
+    dt = T/float(N)
+    rates = [r0]
+    for i in range(N):
+        dr = K * (theta - rates[-1]) * dt + \
+            sigma*rates[-1]* \
+            math.sqrt(dt)*np.random.normal()
+
+        rates.append(rates[-1] + dr)
+
+    return range(N+1), rates
+
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(12, 8))
+for K in [0.002, 0.02, 0.2]:
+    x, y = brennan_schwartz(0.005, K, 0.006, 0.05, T=10, N=200)
+    ax.plot(x, y, label=f'K={K}')
+
+ax.legend(loc='upper left')
+ax.set_xlabel('Brennan and Schwartz model');
+
+#%% Pricing a zero-coupon bond by the Vasicek model
+
+def exact_zcb(theta, kappa, sigma, tau, r0 = 0):
+    B = (1 - np.exp(-kappa*tau)) / kappa
+    A = np.exp((theta - (sigma**2) / (2*(kappa**2))) * (B-tau) - \
+                (sigma**2) / (4*kappa)*(B**2))
+    return A * np.exp(-r0*B)
+
+Ts = np.r_[0:25.5:0.2]
+zcbs = [exact_zcb(0.5, 0.02, 0.03, t, 0.015) for t in Ts]
+
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(12,8))
+ax.set_title("Zero Coupon Bond (ZCB) Values by Time")
+ax.plot(Ts, zcbs, label='ZCB')
+ax.set_ylabel('Value ($)')
+ax.set_xlabel('Time in years')
+ax.legend()
+ax.grid(True);
