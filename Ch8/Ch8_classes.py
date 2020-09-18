@@ -255,11 +255,19 @@ class MeanReversionTrader(object):
 
     # Simply assigning three class methods as listeners on aby broker-generated event
     def on_price_event(self, symbol, bid, ask):
-        print(f"""{dt.datetime.now()}, [PRICE] {symbol},
-                    bid: {bid}, ask: {ask}""")
+        print(f"{dt.datetime.now()}, [PRICE] {symbol}, bid: {bid}, ask: {ask}")
         self.bid_price = bid
         self.ask_price = ask
         self.df_prices.loc[pd.Timestamp.now(), symbol] = (bid + ask) / 2
+
+        self.df_resampled = self.df_prices\
+                    .resample(self.resample_interval)\
+                    .ffill()\
+                    .dropna()
+        self.resampled_len = len(self.df_resampled.index)
+
+        if self.resampled_len > self.mean_periods:
+            self.df_resampled = self.df_resampled.iloc[self.mean_periods - 1 : ]
 
         self.get_positions()
         self.generate_signals_and_think()
@@ -272,10 +280,19 @@ class MeanReversionTrader(object):
         except Exception as ex:
             print('get_positions error: ', ex)
 
+    @property
+    def position_state(self):
+            if self.position == 0:
+                return 'FLAT'
+            elif self.position > 0:
+                return 'LONG'
+            elif self.position < 0:
+                return 'SHORT'
+
     def on_order_event(self, symbol, quantity, is_buy, transaction_id, status):
-        print(f"""{dt.datetime.now()}, [ORDER], transaction_id: {transaction_id},
-            status: {status}, symbol: {symbol}, quantity: {quatity},
-            is_buy: {is_buy}""")
+        print(f'{dt.datetime.now()}, [ORDER], transaction_id: {transaction_id},',
+            f'status: {status}, symbol: {symbol}, quantity: {quantity},',
+            f'is_buy: {is_buy}')
         if status == 'FILLED':
             self.is_order_pending = False
             self.is_next_signal_cycle = False
@@ -291,31 +308,34 @@ class MeanReversionTrader(object):
             self.print_state()
 
     def print_state(self):
-        print(f"""{dt.datetime.now()} {self.symbol}, {self.position_state},
-                {abs(self.position)}, upnl: {self.upnl}, pnl: {self.pnl}""")
+        print(f'{dt.datetime.now()} {self.symbol}, {self.position_state},',
+            f'{abs(self.position)}, upnl: {self.upnl}, pnl: {self.pnl}')
 
     def generate_signals_and_think(self):
-        df_resampled = self.df_prices\
-            .resample(self.resample_interval)\
-            .ffill()\
-            .dropna()
-        resampled_len =len(df_resampled.index)
+        # df_resampled = self.df_prices\
+            # .resample(self.resample_interval)\
+            # .ffill()\
+            # .dropna()
+        # resampled_len = len(df_resampled.index)
 
-        if resampled_len < self.mean_periods:
+        if self.resampled_len < self.mean_periods:
             print(
-              f'''Insufficient data size to calculate logic. Need
-                {self.mean_periods - resampled_len} more.'''
+              f'Insufficient data size to calculate logic. Need',
+                f'{self.mean_periods - self.resampled_len} more.'
                 )
-        mean = df_resampled.tail(self.mean_periods).mean()[self.symbol]
+            return
+
+        mean = self.df_resampled.tail(self.mean_periods).mean()[self.symbol]
+        std = self.df_resampled.tail(self.mean_periods).std()[self.symbol]
 
         # Signal flag calculation
-        is_signal_buy = mean > self.ask_price
-        is_signal_sell = mean < self.bid_price
+        is_signal_buy = mean-(0.3*std) > self.ask_price
+        is_signal_sell = mean+(0.3*std) < self.bid_price
 
         print(
             'is_signal_buy: ', is_signal_buy,
-            'is_signal_sell: ', is_signal_sell,
-            f'average_price: {mean:.5f}',
+            '\nis_signal_sell: ', is_signal_sell,
+            f'\naverage_price: {mean:.5f}',
             'bid: ', self.bid_price,
             'ask: ', self.ask_price
         )
@@ -356,7 +376,7 @@ class MeanReversionTrader(object):
             return
 
     def think_when_position_short(self, is_signal_buy):
-        if is_signal_buy and self.is_next_signal_cycle:
+        if is_signal_buy:
             print(f'Opening position, BUY, {self.symbol}, {self.units} units')
             self.is_order_pending = True
             self.send_market_order(self.symbol, self.units, True)
@@ -370,6 +390,6 @@ class MeanReversionTrader(object):
         self.broker.stream_prices(symbols=[self.symbol])
 
 if __name__ == "__main__":
-    trader = MeanReversionTrader(broker, symbol='EUR_USD', units=1,
+    trader = MeanReversionTrader(broker, symbol='EUR_USD', units=5000,
                         resample_interval='60s', mean_periods=5)
     trader.run()
