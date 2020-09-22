@@ -329,8 +329,8 @@ class MeanReversionTrader(object):
         std = self.df_resampled.tail(self.mean_periods).std()[self.symbol]
 
         # Signal flag calculation
-        is_signal_buy = mean-(0.3*std) > self.ask_price
-        is_signal_sell = mean+(0.3*std) < self.bid_price
+        is_signal_buy = mean > self.ask_price
+        is_signal_sell = mean < self.bid_price
 
         print(
             'is_signal_buy: ', is_signal_buy,
@@ -389,7 +389,60 @@ class MeanReversionTrader(object):
         self.get_positions()
         self.broker.stream_prices(symbols=[self.symbol])
 
+class TrendFollowingTrader(MeanReversionTrader):
+    def __init__(self, *args, long_mean_periods = 10,
+                buy_threshold = 1.0, sell_threshold = 1.0, **kwargs):
+        super(TrendFollowingTrader, self).__init__(*args, **kwargs)
+
+        self.long_mean_periods = long_mean_periods
+        self.buy_threshold = buy_threshold
+        self.sell_threshold = sell_threshold
+
+    def on_price_event(self, symbol, bid, ask):
+        print(f"{dt.datetime.now()}, [PRICE] {symbol}, bid: {bid}, ask: {ask}")
+        self.bid_price = bid
+        self.ask_price = ask
+        self.df_prices.loc[pd.Timestamp.now(), symbol] = (bid + ask) / 2
+
+        self.df_resampled = self.df_prices\
+                    .resample(self.resample_interval)\
+                    .ffill()\
+                    .dropna()
+        self.resampled_len = len(self.df_resampled.index)
+
+        if self.resampled_len > self.long_mean_periods:
+            self.df_resampled = self.df_resampled.iloc[self.long_mean_periods - 1 : ]
+
+        self.get_positions()
+        self.generate_signals_and_think()
+
+        self.print_state()
+
+    def generate_signals_and_think(self):
+        if self.resampled_len < self.long_mean_periods:
+            print(
+                f'Insifficient data size to calculate logic. Need \
+                {self.long_mean_periods-self.resampled_len} more.'
+            )
+            return
+
+        mean_short = self.df_resampled.tail(self.mean_periods).mean()[self.symbol]
+        mean_long = self.df_resampled.tail(self.long_mean_periods).mean()[self.symbol]
+        beta = mean_short / mean_long
+
+        #signal flag calculations
+        is_signal_buy = beta > self.buy_threshold
+        is_signal_sell = beta < self.sell_threshold
+
+        print(
+            f'is_signal_buy: {is_signal_buy} \n is_signal_sell: {is_signal_sell} \n\
+            beta: {beta}, bid: {self.bid_price}, ask: {self.ask_price}'
+        )
+
+        self.think(is_signal_buy, is_signal_sell)
+
 if __name__ == "__main__":
-    trader = MeanReversionTrader(broker, symbol='EUR_USD', units=5000,
-                        resample_interval='60s', mean_periods=5)
+    trader = TrendFollowingTrader(broker, symbol='EUR_JPY', units=50,
+                        resample_interval='60s', mean_periods=5, long_mean_periods=10,
+                        buy_threshold=1.000010, sell_threshold=0.99990)
     trader.run()
